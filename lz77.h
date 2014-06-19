@@ -465,13 +465,13 @@ struct decompress_t {
 
         if (state.state == -1) {
 
+            ret.clear();
+
             size_t size;
             if (!pop_vlq_uint(i, e, size))
                 return true;
 
             ++i;
-
-            ret.clear();
 
             state = state_t();
 
