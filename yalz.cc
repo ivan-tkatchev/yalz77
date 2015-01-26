@@ -13,41 +13,45 @@ int main(int argc, char** argv) {
     }
 
     std::string mode(argv[1]);
-    
+
+    const size_t BUFSIZE = 10*1024*1024;
+
     if (mode == "-c") {
 
         std::string buff;
-        buff.resize(10*1024*1024);
 
         while (1) {
+            buff.resize(BUFSIZE);
             size_t i = ::fread((void*)buff.data(), 1, buff.size(), stdin);
+            buff.resize(i);
 
             if (i > 0) {
                 std::string out = lz77::compress(buff);
                 ::fwrite(out.data(), 1, out.size(), stdout);
             }
 
-            if (i != buff.size())
+            if (i != BUFSIZE)
                 break;
         }
     
     } else if (mode == "-d") {
 
         std::string buff;
-        buff.resize(10*1024*1024);
 
         lz77::decompress_t decompress;
         std::string extra;
 
         while (1) {
+            buff.resize(BUFSIZE);
             size_t i = ::fread((void*)buff.data(), 1, buff.size(), stdin);
-
+            buff.resize(i);
+            
             if (i == 0)
                 break;
 
             std::string* what = &buff;
             
-            while (1) {
+            while (!what->empty()) {
 
                 bool done = decompress.feed(*what, extra);
 
@@ -60,7 +64,7 @@ int main(int argc, char** argv) {
                 what = &extra;
             }
 
-            if (i != buff.size())
+            if (i != BUFSIZE)
                 break;
         }
 
