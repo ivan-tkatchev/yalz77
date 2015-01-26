@@ -90,6 +90,16 @@
 
 namespace lz77 {
 
+// Constants
+enum {
+    DEFAULT_SEARCHLEN = 8,
+    DEFAULT_BLOCKSIZE = 64*1024,
+    SHORTRUN_BITS = 4,
+    SHORTRUN_MAX = (1 << SHORTRUN_BITS),
+    MIN_RUN = 4
+};
+
+
 // Utility function: encode a size_t as a variable-sized stream of octets with 7 bits of useful data. 
 // (One bit is used to signal an end of stream.)
 
@@ -151,33 +161,31 @@ inline void pack_bytes(const unsigned char* i, uint16_t& packed3, uint16_t& pack
 // 'run' and 'offset' are numbers encoded as variable-length bitstreams; the sum length of 
 // encoded 'run' and 'offset' must be less than 'run'.
 
+inline size_t vlq_length(size_t x) {
+    size_t ret = 1;
+
+    if (x > 0x7F)
+        ret++;
+
+    if (x > 0x3fff)
+        ret++;
+
+    if (x > 0x1fffff)
+        ret++;
+
+    return ret;
+}
+
 inline size_t gains(size_t run, size_t offset) {
 
     size_t gain = run;
-    size_t loss = 2;
+    
+    offset = offset << (SHORTRUN_BITS + 1);
 
-    if (run > 0x7F) {
-        loss++;
-    }
-
-    if (run > 0x3fff) {
-        loss++;
-    }
-
-    if (run > 0x1fffff) {
-        loss++;
-    }
-
-    if (offset > 0x7F) {
-        loss++;
-    }
-
-    if (offset > 0x3fff) {
-        loss++;
-    }
-
-    if (offset > 0x1fffff) {
-        loss++;
+    size_t loss = vlq_length(offset);
+    
+    if (run >= SHORTRUN_MAX) {
+        loss += vlq_length(run - MIN_RUN + 1);
     }
 
     if (loss > gain)
@@ -303,7 +311,8 @@ struct offsets_dict_t {
  * Output: the compressed data as a string.
  */
 
-inline std::string compress(const unsigned char* i, const unsigned char* e, size_t searchlen = 8, size_t blocksize = 64*1024) {
+inline std::string compress(const unsigned char* i, const unsigned char* e,
+                            size_t searchlen = DEFAULT_SEARCHLEN, size_t blocksize = DEFAULT_BLOCKSIZE) {
 
     const unsigned char* i0 = i;
 
@@ -350,7 +359,7 @@ inline std::string compress(const unsigned char* i, const unsigned char* e, size
         // to two bytes, but I found that this decreases quality in
         // practice.)
 
-        if (maxrun < 4) {
+        if (maxrun < MIN_RUN) {
             unc += c;
             ++i;
             continue;
@@ -374,16 +383,16 @@ inline std::string compress(const unsigned char* i, const unsigned char* e, size
         // uncompressed data.
 
         i += maxrun;
-        maxrun = maxrun - 3;
+        maxrun = maxrun - MIN_RUN + 1;
 
-        if (maxrun < 16) {
+        if (maxrun < SHORTRUN_MAX) {
 
-            size_t msg = ((maxoffset << 4) | maxrun) << 1;
+            size_t msg = ((maxoffset << SHORTRUN_BITS) | maxrun) << 1;
             push_vlq_uint(msg, ret);
             
         } else {
 
-            size_t msg = (maxoffset << 5);
+            size_t msg = (maxoffset << (SHORTRUN_BITS + 1));
             push_vlq_uint(msg, ret);
             push_vlq_uint(maxrun, ret);
         }
@@ -400,7 +409,8 @@ inline std::string compress(const unsigned char* i, const unsigned char* e, size
     return ret;
 }
 
-inline std::string compress(const std::string& s, size_t searchlen = 8, size_t blocksize = 64*1024) {
+inline std::string compress(const std::string& s,
+                            size_t searchlen = DEFAULT_SEARCHLEN, size_t blocksize = DEFAULT_BLOCKSIZE) {
 
     const unsigned char* i = (const unsigned char*)s.data();
     const unsigned char* e = i + s.size();
@@ -561,7 +571,7 @@ struct decompress_t {
 
             } else if (state.state == state_t::READ_RUN) {
 
-                size_t shortrun = state.msg & 15;
+                size_t shortrun = state.msg & (SHORTRUN_MAX - 1);
 
                 if (shortrun) {
 
@@ -575,8 +585,8 @@ struct decompress_t {
                     ++i;
                 }
 
-                size_t off = (state.msg >> 4);
-                size_t run = state.run + 3;
+                size_t off = (state.msg >> SHORTRUN_BITS);
+                size_t run = state.run + MIN_RUN - 1;
 
                 unsigned char* outi = out - off;
 
