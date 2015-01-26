@@ -132,16 +132,16 @@ inline size_t substr_run(const unsigned char* ai, const unsigned char* ae,
     return n;
 }
 
-// Utility function: Hash the first 4 and 7 bytes of a string into 32-bit ints.
-// (4 and 7 are magic constants.)
+// Utility function: Hash the first 3 and 6 bytes of a string into 16-bit ints.
+// (3 and 6 are magic constants.)
 
-inline void pack_bytes(const unsigned char* i, uint32_t& packed4, uint32_t& packed7, size_t blocksize) {
+inline void pack_bytes(const unsigned char* i, uint16_t& packed3, uint16_t& packed6, size_t blocksize) {
 
-    packed4 = (*i | (*(i+1) << 8) | (*(i+2) << 16) | (*(i+3) << 24));
-    packed7 = packed4 + ((*(i+4) << 8) | (*(i+5) << 16) | (*(i+6) << 24));
+    packed3 = ((*(i+0) << 0) | (*(i+1) << 8)) ^ (*(i+2) << 0);// | (*(i+3) << 8));
+    packed6 = packed3 + ((*(i+4) << 8) | (*(i+5) << 0)); // | (*(i+6) << 8));
 
-    packed4 = packed4 % blocksize;
-    packed7 = packed7 % blocksize;
+    packed3 = packed3 % blocksize;
+    packed6 = packed6 % blocksize;
 }
 
 
@@ -214,6 +214,10 @@ struct circular_buffer_t {
         }
     }
 
+    bool empty() {
+        return (head == buff.end());
+    }
+    
     const_iterator begin() {
         return buff.begin();
     }
@@ -227,50 +231,61 @@ struct circular_buffer_t {
 // a list of offsets. (At each offset there is a string with a prefix that hashes
 // to the key.)
 
+struct no_hash_t {
+    size_t operator()(uint16_t x) const { return x; }
+};
+
 struct offsets_dict_t {
 
-    typedef std::unordered_map< uint32_t, circular_buffer_t<size_t> > offsets_t;
+    typedef std::unordered_map< uint16_t, circular_buffer_t<size_t>, no_hash_t > offsets_t;
+    //typedef std::vector< circular_buffer_t<size_t> > offsets_t;
     offsets_t offsets;
 
     size_t searchlen;
 
-    offsets_dict_t(size_t sl) : searchlen(sl) {
+    offsets_dict_t(size_t sl, size_t bs) : searchlen(sl) {
+
+        offsets.rehash(bs);
+        offsets.reserve(bs);
+        offsets.max_load_factor(1);
+        //offsets.resize(bs);
     }
 
-    void operator()(uint32_t packed, const unsigned char* i0, const unsigned char* i, const unsigned char* e,
+    void operator()(uint16_t packed, const unsigned char* i0, const unsigned char* i, const unsigned char* e,
                     size_t& maxrun, size_t& maxoffset, size_t& maxgain) {
 
         circular_buffer_t<size_t>& voffs = offsets[packed];
-        voffs.push_back(i - i0, searchlen);
 
-        if (maxrun > 0)
-            return;
+        if (!voffs.empty()) {
 
-        circular_buffer_t<size_t>::const_iterator z = voffs.head;
+            circular_buffer_t<size_t>::const_iterator z = voffs.head;
 
-        while (1) {
+            while (1) {
 
-            if (z == voffs.begin()) {
-                z = voffs.end() - 1;
+                int offset = i - i0 - *z;
 
-            } else {
-                --z;
-            }
+                size_t run = substr_run(i, e, i0 + *z, e);
+                size_t gain = gains(run, offset);
 
-            if (z == voffs.head)
-                break;
+                if (gain > maxgain) {
+                    maxrun = run;
+                    maxoffset = offset;
+                    maxgain = gain;
+                }
 
-            int offset = i - i0 - *z;
+                if (z == voffs.begin()) {
+                    z = voffs.end() - 1;
 
-            size_t run = substr_run(i, e, i0 + *z, e);
-            size_t gain = gains(run, offset);
+                } else {
+                    --z;
+                }
 
-            if (gain > maxgain) {
-                maxrun = run;
-                maxoffset = offset;
-                maxgain = gain;
+                if (z == voffs.head)
+                    break;
             }
         }
+
+        voffs.push_back(i - i0, searchlen);
     }
 };
 
@@ -293,29 +308,30 @@ struct offsets_dict_t {
  * Output: the compressed data as a string.
  */
 
-inline std::string compress(const std::string& s, size_t searchlen = 32, size_t blocksize = 64*1024) {
+inline std::string compress(const unsigned char* i, const unsigned char* e,
+                            size_t searchlen = 32, size_t blocksize = 64*1024) {
 
-    const unsigned char* i0 = (const unsigned char*)s.data();
-    const unsigned char* i = i0;
-    const unsigned char* e = i0 + s.size();
+    const unsigned char* i0 = i;
 
     std::string ret;
-
+        
     std::string unc;
 
-    push_vlq_uint(s.size(), ret);
+    push_vlq_uint(e - i, ret);
 
-    offsets_dict_t offsets1(searchlen);
-    offsets_dict_t offsets2(searchlen);
+    offsets_dict_t offsets3(searchlen, blocksize);
+    offsets_dict_t offsets6(searchlen, blocksize);
 
+    size_t skipped = 0;
+    
     while (i != e) {
 
         unsigned char c = *i;
 
-        // The last 7 bytes are uncompressable. (At least 7 bytes
+        // The last 6 bytes are uncompressable. (At least 6 bytes
         // are needed to calculate a prefix hash.)
 
-        if (i > e - 7) {
+        if (i > e - 6) {
 
             unc +=c;
             ++i;
@@ -326,21 +342,18 @@ inline std::string compress(const std::string& s, size_t searchlen = 32, size_t 
         size_t maxoffset = 0;
         size_t maxgain = 0;
 
-        uint32_t packed7;
-        uint32_t packed4;
+        uint16_t packed3;
+        uint16_t packed6;
 
-        // Prefix lengths of 4 and 7 were chosen empirically, based on a series
+        // Prefix lengths of 3 and 6 were chosen empirically, based on a series
         // of unscientific tests.
 
-        // NOTE:
-        // An additional hash map for prefixes of size 11 would increase quality
-        // further, at the cost of longer running time. I decided against implementing
-        // it here.
+        pack_bytes(i, packed3, packed6, blocksize);
 
-        pack_bytes(i, packed7, packed4, blocksize);
+        offsets6(packed6, i0, i, e, maxrun, maxoffset, maxgain);
+        offsets3(packed3, i0, i, e, maxrun, maxoffset, maxgain);
 
-        offsets2(packed7, i0, i, e, maxrun, maxoffset, maxgain);
-        offsets1(packed4, i0, i, e, maxrun, maxoffset, maxgain);
+        //std::cout << ": " << maxrun << std::endl;
 
         // A substring of length less than 4 is useless for us.
         // (Theoretically a substring of length 3 can be compressed
@@ -348,6 +361,7 @@ inline std::string compress(const std::string& s, size_t searchlen = 32, size_t 
         // practice.)
 
         if (maxrun < 4) {
+            skipped++;
             unc += c;
             ++i;
             continue;
@@ -372,6 +386,8 @@ inline std::string compress(const std::string& s, size_t searchlen = 32, size_t 
         // Compressed strings are encoded with at least two bytes:
         // a length and an offset.
 
+        //std::cout << ": " << maxrun << " " << maxoffset << std::endl;
+        
         push_vlq_uint(maxrun, ret);
         push_vlq_uint(maxoffset, ret);
         i += maxrun;
@@ -384,7 +400,16 @@ inline std::string compress(const std::string& s, size_t searchlen = 32, size_t 
         unc.clear();
     }
 
+    std::cerr << "Skipped: " << skipped << std::endl;
+    
     return ret;
+}
+
+inline std::string compress(const std::string& s, size_t searchlen = 8, size_t blocksize = 64*1024) {
+
+    const unsigned char* i = (const unsigned char*)s.data();
+    const unsigned char* e = i + s.size();
+    return compress(i, e, searchlen, blocksize);
 }
 
 /*
