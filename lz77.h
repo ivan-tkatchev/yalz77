@@ -17,10 +17,10 @@
  *   - Fast decompression.
  *   - Pretty good compression
  *   - Simple 'one-button' API for realistic use-cases.
- *   - No penalty (only 3 bytes) even when compressing very short strings.
+ *   - No penalty (only 2 bytes overhead) even when compressing very short strings.
  *
  * Compression performance and quality should be _roughly_ on par with LZO 
- * at highest quality setting.
+ * at high quality settings.
  * (Note that your mileage will vary depending on input data; for example, 
  * this code will degrade less gracefully compared to LZO when trying to 
  * compress uncompressable data.)
@@ -134,11 +134,13 @@ inline size_t substr_run(const unsigned char* ai, const unsigned char* ae,
 
 // Utility function: Hash the first 3 and 6 bytes of a string into 16-bit ints.
 // (3 and 6 are magic constants.)
+// The hash function itself is important for compression quality, and was arrived
+// at by a series of unscientific empirical tests.
 
 inline void pack_bytes(const unsigned char* i, uint16_t& packed3, uint16_t& packed6, size_t blocksize) {
 
-    packed3 = ((*(i+0) << 0) | (*(i+1) << 8)) ^ (*(i+2) << 0);// | (*(i+3) << 8));
-    packed6 = packed3 + ((*(i+4) << 8) | (*(i+5) << 0)); // | (*(i+6) << 8));
+    packed3 = ((*(i+0) << 0) | (*(i+1) << 8)) ^ (*(i+2) << 0);
+    packed6 = packed3 + ((*(i+4) << 8) | (*(i+5) << 0));
 
     packed3 = packed3 % blocksize;
     packed6 = packed6 % blocksize;
@@ -238,18 +240,11 @@ struct no_hash_t {
 struct offsets_dict_t {
 
     typedef std::unordered_map< uint16_t, circular_buffer_t<size_t>, no_hash_t > offsets_t;
-    //typedef std::vector< circular_buffer_t<size_t> > offsets_t;
     offsets_t offsets;
 
     size_t searchlen;
 
-    offsets_dict_t(size_t sl, size_t bs) : searchlen(sl) {
-
-        offsets.rehash(bs);
-        offsets.reserve(bs);
-        offsets.max_load_factor(1);
-        //offsets.resize(bs);
-    }
+    offsets_dict_t(size_t sl, size_t bs) : searchlen(sl) { }
 
     void operator()(uint16_t packed, const unsigned char* i0, const unsigned char* i, const unsigned char* e,
                     size_t& maxrun, size_t& maxoffset, size_t& maxgain) {
@@ -302,14 +297,13 @@ struct offsets_dict_t {
  * 'blocksize' is the upper bound for hash table sizes.
  * 'searchlen' is the upper bound for lists of offsets at each hash value.
  *
- * A larger 'blocksize' increases memory consumption and compression quality.
- * A larger 'searchlen' increases running time, memory consumption and compression quality.
+ * A larger 'searchlen' increases running time, memory consumption and compression quality. 
+ * A larger 'blocksize' increases memory consumption and compression quality. (Really shouldn't be changed, the default is good.)
  *
  * Output: the compressed data as a string.
  */
 
-inline std::string compress(const unsigned char* i, const unsigned char* e,
-                            size_t searchlen = 32, size_t blocksize = 64*1024) {
+inline std::string compress(const unsigned char* i, const unsigned char* e, size_t searchlen = 8, size_t blocksize = 64*1024) {
 
     const unsigned char* i0 = i;
 
@@ -322,13 +316,11 @@ inline std::string compress(const unsigned char* i, const unsigned char* e,
     offsets_dict_t offsets3(searchlen, blocksize);
     offsets_dict_t offsets6(searchlen, blocksize);
 
-    size_t skipped = 0;
-    
     while (i != e) {
 
         unsigned char c = *i;
 
-        // The last 6 bytes are uncompressable. (At least 6 bytes
+        // The last 5 bytes are uncompressable. (At least 6 bytes
         // are needed to calculate a prefix hash.)
 
         if (i > e - 6) {
@@ -353,55 +345,58 @@ inline std::string compress(const unsigned char* i, const unsigned char* e,
         offsets6(packed6, i0, i, e, maxrun, maxoffset, maxgain);
         offsets3(packed3, i0, i, e, maxrun, maxoffset, maxgain);
 
-        //std::cout << ": " << maxrun << std::endl;
-
         // A substring of length less than 4 is useless for us.
         // (Theoretically a substring of length 3 can be compressed
         // to two bytes, but I found that this decreases quality in
         // practice.)
 
         if (maxrun < 4) {
-            skipped++;
             unc += c;
             ++i;
             continue;
         }
 
+        
         if (unc.size() > 0) {
+            // Write a packet of uncompressed data.
 
-            // Uncompressed strings of length 3 and less are encoded
-            // with one extra byte: the length. Longer uncompressed strings 
-            // are encoded with at least two extra bytes: a 0 flag and a 
-            // length.
-
-            if (unc.size() >= 4) {
-                push_vlq_uint(0, ret);
-            }
-
-            push_vlq_uint(unc.size(), ret);
+            size_t msg = (unc.size() << 1) | 1;
+            push_vlq_uint(msg, ret);
             ret += unc;
             unc.clear();
         }
 
-        // Compressed strings are encoded with at least two bytes:
-        // a length and an offset.
+        // A compressed string is a length and an offset.
+        // First subtract 3 from the length (lengths less than 3 don't exist).
+        // Then check if the length fits in four bits; if it does, then
+        // tack it on to the offset. Otherwise write length and offset separately.
+        // The rightmost bit is a zero to differentiate from packets of
+        // uncompressed data.
 
-        //std::cout << ": " << maxrun << " " << maxoffset << std::endl;
-        
-        push_vlq_uint(maxrun, ret);
-        push_vlq_uint(maxoffset, ret);
         i += maxrun;
+        maxrun = maxrun - 3;
+
+        if (maxrun < 16) {
+
+            size_t msg = ((maxoffset << 4) | maxrun) << 1;
+            push_vlq_uint(msg, ret);
+            
+        } else {
+
+            size_t msg = (maxoffset << 5);
+            push_vlq_uint(msg, ret);
+            push_vlq_uint(maxrun, ret);
+        }
     }
 
     if (unc.size() > 0) {
-        push_vlq_uint(0, ret);
-        push_vlq_uint(unc.size(), ret);
+
+        size_t msg = (unc.size() << 1) | 1;
+        push_vlq_uint(msg, ret);
         ret += unc;
         unc.clear();
     }
 
-    std::cerr << "Skipped: " << skipped << std::endl;
-    
     return ret;
 }
 
@@ -426,13 +421,18 @@ struct decompress_t {
     unsigned char* oute;
 
     struct state_t {
+        size_t msg;
         size_t run;
-        size_t off_or_len;
         size_t vlq_num;
         size_t vlq_off;
-        int state;
+        enum {
+            INIT,
+            START,
+            READ_DATA,
+            READ_RUN
+        } state;
 
-        state_t() : run(0), off_or_len(0), vlq_num(0), vlq_off(0), state(-1) {}
+        state_t() : msg(0), run(0), vlq_num(0), vlq_off(0), state(INIT) {}
     };
 
     state_t state;
@@ -488,7 +488,11 @@ struct decompress_t {
 
     bool feed(const unsigned char* i, const unsigned char* e, std::string& remaining) {
 
-        if (state.state == -1) {
+        // This function is complex because it is streamable and robust.
+        // The routine checks if the input isn't complete and will properly
+        // pick up from where we left off when the rest of the input arrives.
+        
+        if (state.state == state_t::INIT) {
 
             ret.clear();
 
@@ -506,106 +510,100 @@ struct decompress_t {
             oute = outb + size;
             out = outb;
 
-            state.state = 0;
+            state.state = state_t::START;
         }
 
         while (i != e) {
 
             if (out == oute) {
                 remaining.assign(i, e);
-                state.state = -1;
+                state.state = state_t::INIT;
                 return true;
             }
 
-            if (state.state == 0) {
+            if (state.state == state_t::START) {
 
-                if (!pop_vlq_uint(i, e, state.run))
+                if (!pop_vlq_uint(i, e, state.msg))
                     return false;
 
                 ++i;
 
-                state.state = 1;
+                state.state = ((state.msg & 1) ? state_t::READ_DATA : state_t::READ_RUN);
+
+                state.msg = state.msg >> 1;
             }
 
-            if (i == e) {
-                return false;
-            }
+            if (state.state == state_t::READ_DATA) {
 
-            if (state.run < 4) {
-
-                if (state.state == 1) {
-
-                    state.off_or_len = state.run;
-
-                    if (state.run == 0) {
-
-                        if (!pop_vlq_uint(i, e, state.off_or_len))
-                            return false;
-
-                        ++i;
-                    }
-
-                    state.state = 2;
-                }
-
-                if (out + state.off_or_len > oute)
+                size_t len = state.msg;
+                
+                if (out + len > oute)
                     throw std::runtime_error("Malformed data while uncompressing");
 
                 if (i == e)
                     return false;
 
-                if (i + state.off_or_len > e) {
+                if (i + len > e) {
 
-                    size_t len = e - i;
-                    ::memcpy(out, &(*i), len);
-                    out += len;
-                    state.off_or_len -= len;
+                    size_t l = e - i;
+                    ::memcpy(out, &(*i), l);
+                    out += l;
+                    state.msg -= l;
 
                     return false;
                 }
 
-                ::memcpy(out, &(*i), state.off_or_len);
-                out += state.off_or_len;
-                i += state.off_or_len;
+                ::memcpy(out, &(*i), len);
+                out += len;
+                i += len;
 
-                state.state = 0;
+                state.state = state_t::START;
 
-            } else {
+            } else if (state.state == state_t::READ_RUN) {
 
-                if (state.state == 1) {
+                size_t shortrun = state.msg & 15;
 
-                    if (!pop_vlq_uint(i, e, state.off_or_len))
+                if (shortrun) {
+
+                    state.run = shortrun;
+
+                } else {
+
+                    if (!pop_vlq_uint(i, e, state.run))
                         return false;
 
                     ++i;
                 }
 
-                state.state = 0;
+                size_t off = (state.msg >> 4);
+                size_t run = state.run + 3;
 
-                unsigned char* outi = out - state.off_or_len;
+                unsigned char* outi = out - off;
 
-                if (outi < outb || out + state.run > oute)
+                if (outi < outb || out + run > oute)
                     throw std::runtime_error("Malformed data while uncompressing");
 
-                if (outi + state.run < out) {
-                    ::memcpy(out, outi, state.run);
-                    out += state.run;
+                if (outi + run < out) {
+                    ::memcpy(out, outi, run);
+                    out += run;
 
                 } else {
 
-                    while (state.run > 0) {
+                    while (run > 0) {
                         *out = *outi;
                         ++out;
                         ++outi;
-                        --state.run;
+                        --run;
                     }
                 }
+
+                state.state = state_t::START;
             }
         }
 
         if (out == oute) {
             remaining.assign(i, e);
-            state.state = -1;
+            state.state = state_t::INIT;
             return true;
         }
 
