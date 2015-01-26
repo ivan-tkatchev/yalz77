@@ -19,11 +19,14 @@
  *   - Simple 'one-button' API for realistic use-cases.
  *   - No penalty (only 2 bytes overhead) even when compressing very short strings.
  *
- * Compression performance and quality should be _roughly_ on par with LZO 
- * at high quality settings.
- * (Note that your mileage will vary depending on input data; for example, 
- * this code will degrade less gracefully compared to LZO when trying to 
- * compress uncompressable data.)
+ * Compression performance and quality should be _roughly_ on par with other
+ * compression algorithms.
+ *
+ * (Compression ratio is comparable to other LZ algorithms at when at high 
+ * quality settings, compression speed is comparable to gzip; it could be made 
+ * better if the standard C++ data structures were to be replaced by something 
+ * more customized and more complex. Decompression speed is on par with other 
+ * fast LZ algorithms.)
  *
  */
 
@@ -94,9 +97,9 @@ namespace lz77 {
 enum {
     DEFAULT_SEARCHLEN = 8,
     DEFAULT_BLOCKSIZE = 64*1024,
-    SHORTRUN_BITS = 4,
+    SHORTRUN_BITS = 3,
     SHORTRUN_MAX = (1 << SHORTRUN_BITS),
-    MIN_RUN = 4
+    MIN_RUN = 3
 };
 
 
@@ -306,7 +309,8 @@ struct offsets_dict_t {
  * 'searchlen' is the upper bound for lists of offsets at each hash value.
  *
  * A larger 'searchlen' increases running time, memory consumption and compression quality. 
- * A larger 'blocksize' increases memory consumption and compression quality. (Really shouldn't be changed, the default is good.)
+ * A larger 'blocksize' increases memory consumption and compression quality. 
+ *  (Blocksize really shouldn't be changed, the default is good.)
  *
  * Output: the compressed data as a string.
  */
@@ -354,11 +358,8 @@ inline std::string compress(const unsigned char* i, const unsigned char* e,
         offsets6(packed6, i0, i, e, maxrun, maxoffset, maxgain);
         offsets3(packed3, i0, i, e, maxrun, maxoffset, maxgain);
 
-        // A substring of length less than 4 is useless for us.
-        // (Theoretically a substring of length 3 can be compressed
-        // to two bytes, but I found that this decreases quality in
-        // practice.)
-
+        // A substring of length less than 3 is useless for us.
+        // (The hash uses 3 characters to search for matches.)
         if (maxrun < MIN_RUN) {
             unc += c;
             ++i;
@@ -376,8 +377,8 @@ inline std::string compress(const unsigned char* i, const unsigned char* e,
         }
 
         // A compressed string is a length and an offset.
-        // First subtract 3 from the length (lengths less than 3 don't exist).
-        // Then check if the length fits in four bits; if it does, then
+        // First subtract 2 from the length (lengths less than 3 don't exist).
+        // Then check if the length fits in three bits; if it does, then
         // tack it on to the offset. Otherwise write length and offset separately.
         // The rightmost bit is a zero to differentiate from packets of
         // uncompressed data.
