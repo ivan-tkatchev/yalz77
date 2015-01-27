@@ -9,6 +9,7 @@
 
 /*
  * This is a variation on the LZ77 compression algorithm.
+ * It is designed for code simplicity and clarity.
  * 
  * Highlights:
  *
@@ -76,7 +77,7 @@
   'result' is the decompressed message.
 
   NOTE: calling feed() and result() out of order is undefined
-  behaviour and will result in crashes.
+  behaviour and might result in crashes.
 
 */
 
@@ -147,16 +148,29 @@ inline size_t substr_run(const unsigned char* ai, const unsigned char* ae,
 
 // Utility function: Hash the first 3 and 6 bytes of a string into 16-bit ints.
 // (3 and 6 are magic constants.)
-// The hash function itself is important for compression quality, and was arrived
-// at by a series of unscientific empirical tests.
+// The hash function itself is important for compression quality.
+// This is the FNV hash, a very very simple and quite good hash algorithm.
 
+inline uint32_t fnv32a(const unsigned char* i, size_t len, uint32_t hash = 0x811c9dc5) {
+
+    while (len > 0) {
+        hash ^= (uint32_t)(*i);
+        //hash *= 0x01000193;
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+        ++i;
+        --len;
+    }
+
+    return hash;
+}
+   
 inline void pack_bytes(const unsigned char* i, uint16_t& packed3, uint16_t& packed6, size_t blocksize) {
 
-    packed3 = ((*(i+0) << 0) | (*(i+1) << 8)) ^ (*(i+2) << 0);
-    packed6 = packed3 + ((*(i+4) << 8) | (*(i+5) << 0));
+    uint32_t a = fnv32a(i, 3);
+    uint32_t b = fnv32a(i+3, 3, a);
 
-    packed3 = packed3 % blocksize;
-    packed6 = packed6 % blocksize;
+    packed3 = (a >> 16) % blocksize;
+    packed6 = (b >> 16) % blocksize;
 }
 
 
