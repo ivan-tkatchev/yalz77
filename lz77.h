@@ -155,7 +155,6 @@ inline uint32_t fnv32a(const unsigned char* i, size_t len, uint32_t hash = 0x811
 
     while (len > 0) {
         hash ^= (uint32_t)(*i);
-        //hash *= 0x01000193;
         hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
         ++i;
         --len;
