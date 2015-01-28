@@ -76,7 +76,8 @@ int main(int argc, char** argv) {
 
     {
         bm _x2("Compression time");
-        out = lz77::compress(inp);
+        lz77::compress_t compress;
+        out = compress.feed(inp);
     }
 
     std::cout << "Compressed size:   " << out.size() << std::endl;
