@@ -311,9 +311,12 @@ struct offsets_dict_t {
  * 'blocksize' is the upper bound for hash table sizes.
  * 'searchlen' is the upper bound for lists of offsets at each hash value.
  *
- * A larger 'searchlen' increases running time, memory consumption and compression quality. 
+ * A larger 'searchlen' increases compression quality, running time and memory consumption. 
  * A larger 'blocksize' increases memory consumption and compression quality. 
- *  (Blocksize really shouldn't be changed, the default is good.)
+ *
+ * If you want faster compression at the expense of quality, try lowering searchlen.
+ *
+ * If you only ever compress short strings, try lowering blocksize to save memory.
  *
  * Output: the compressed data as a string.
  */
