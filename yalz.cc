@@ -20,13 +20,15 @@ int main(int argc, char** argv) {
 
         std::string buff;
 
+        lz77::compress_t compress;
+        
         while (1) {
             buff.resize(BUFSIZE);
             size_t i = ::fread((void*)buff.data(), 1, buff.size(), stdin);
             buff.resize(i);
 
             if (i > 0) {
-                std::string out = lz77::compress(buff);
+                std::string out = compress.feed(buff);
                 ::fwrite(out.data(), 1, out.size(), stdout);
             }
 
