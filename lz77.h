@@ -47,6 +47,10 @@
 
   const std::string& uncompressed = decompress.result();
 
+  Note: if you're compressing short strings (on the order of a few kilobytes)
+  then instantiating lz77::compress_t with the arguments (8, 4096) will
+  give better results.
+
   --------
 
   Use decompress.feed(...) for feeding input data step-by-step in chunks.

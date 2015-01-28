@@ -6,22 +6,35 @@
 
 int main(int argc, char** argv) {
 
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s [-c|-d], where -c is compression and -d is decompression.\n"
-                "Input is stdin and and output is stdout.\n", argv[0]);
-        return 1;
+    bool compress = false;
+    bool decompress = false;
+    bool fastmode = false;
+    bool smallmode = false;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg(argv[i]);
+
+        if (arg == "-c")
+            compress = true;
+        else if (arg == "-d")
+            decompress = true;
+        else if (arg == "-1")
+            fastmode = true;
+        else if (arg == "-2")
+            smallmode = true;
     }
 
-    std::string mode(argv[1]);
+    const size_t BUFSIZE = (smallmode ? 100*1024 : 10*1024*1024);
 
-    const size_t BUFSIZE = 10*1024*1024;
-
-    if (mode == "-c") {
+    if (compress) {
 
         std::string buff;
 
-        lz77::compress_t compress;
+        size_t searchlen = (fastmode ? 1 : lz77::DEFAULT_SEARCHLEN);
+        size_t blocksize = (smallmode ? 4096 : lz77::DEFAULT_BLOCKSIZE);
         
+        lz77::compress_t compress(searchlen, blocksize);
+
         while (1) {
             buff.resize(BUFSIZE);
             size_t i = ::fread((void*)buff.data(), 1, buff.size(), stdin);
@@ -36,7 +49,7 @@ int main(int argc, char** argv) {
                 break;
         }
     
-    } else if (mode == "-d") {
+    } else if (decompress) {
 
         std::string buff;
 
@@ -71,8 +84,10 @@ int main(int argc, char** argv) {
         }
 
     } else {
-        fprintf(stderr, "Usage: %s [-c|-d], where -c is compression and -d is decompression.\n"
-                "Input is stdin and and output is stdout.\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-1|-2] {-c|-d}, where -c is compression and -d is decompression.\n"
+                "  Input is stdin and and output is stdout.\n"
+                "  Add '-1' when compressing to enable fast and bad compression.\n"
+                "  Add '-2' when compressing to enable a compression mode for small files.", argv[0]);
         return 1;
     }
 
