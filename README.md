@@ -10,26 +10,32 @@ Feel free to steal it.
 ----
 
 This is a variation on the LZ77 compression algorithm.
- 
-Highlights:
+It is designed for code simplicity and clarity.
+
+### Highlights: ###
 
 - Portable, self-contained, tiny implementation in readable C++. 
   (Header-only, no ifdefs or CPU dependencies or other stupid tricks.)
 - Fast decompression.
 - Pretty good compression quality.
 - Simple 'one-button' API for realistic use-cases.
-- No penalty (only 3 bytes) even when compressing very short strings.
+- No penalty (only 2 bytes overhead) even when compressing very short strings.
+- Fully streamable decompressor: feed it chunks of arbitrarity-sized data, and the
+  original uncompressed buffers will be reconstructed automatically.
 
-Compression performance and quality should be _roughly_ on par with LZO at highest quality setting.
-(Note that your mileage will vary depending on input data; for example, this code will degrade less
-gracefully compared to LZO when trying to compress uncompressable data.)
+Compression performance and quality should be _roughly_ on par with other compression algorithms.
 
-Usage:
+(Compression ratio is comparable to other LZ algorithms when at high quality 
+settings, compression speed is comparable to gzip. Decompression speed is on par
+with other fast LZ algorithms.)
+
+### Usage: ###
 
     #include "lz77.h"
     
     std::string input = ...;
-    std::string compressed = lz77::compress(input);
+    lz77::compress_t compress;
+    std::string compressed = compress.feed(input);
     
     lz77::decompress_t decompress;
     
@@ -37,6 +43,13 @@ Usage:
     decompress.feed(compressed, temp);
     
     const std::string& uncompressed = decompress.result();
+
+_Note_: if you're compressing short strings (on the order of a few kilobytes)
+then instantiating `lz77::compress_t compress(8, 4096)` will give better results.
+
+Instantiate `lz77::compress_t compress(1)` if you want compression speed at
+the expense of quality.
+
 
 Use `decompress.feed(...)` for feeding input data step-by-step in chunks.
 For example, if you're trying to decompress a network byte stream:
@@ -67,6 +80,6 @@ decompressor will detect message boundaries properly for you.)
 
 `result` is the decompressed message.
 
-NOTE: calling `feed()` and `result()` out of order is undefined
+_Note_: calling `feed()` and `result()` out of order is undefined
 behaviour and will result in crashes.
 

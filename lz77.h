@@ -16,18 +16,18 @@
  *   - Portable, self-contained, tiny implementation in readable C++. 
  *     (Header-only, no ifdefs or CPU dependencies or other stupid tricks.)
  *   - Fast decompression.
- *   - Pretty good compression
+ *   - Pretty good compression quality.
  *   - Simple 'one-button' API for realistic use-cases.
  *   - No penalty (only 2 bytes overhead) even when compressing very short strings.
+ *   - Fully streamable decompressor: feed it chunks of arbitrarity-sized data, and the
+ *     original uncompressed buffers will be reconstructed automatically.
  *
  * Compression performance and quality should be _roughly_ on par with other
  * compression algorithms.
  *
- * (Compression ratio is comparable to other LZ algorithms at when at high 
- * quality settings, compression speed is comparable to gzip; it could be made 
- * better if the standard C++ data structures were to be replaced by something 
- * more customized and more complex. Decompression speed is on par with other 
- * fast LZ algorithms.)
+ * (Compression ratio is comparable to other LZ algorithms when at high quality 
+ * settings, compression speed is comparable to gzip. Decompression speed is on par
+ * with other fast LZ algorithms.)
  *
  */
 
@@ -47,7 +47,7 @@
 
   const std::string& uncompressed = decompress.result();
 
-  Note: if you're compressing short strings (on the order of a few kilobytes)
+  NOTE: if you're compressing short strings (on the order of a few kilobytes)
   then instantiating lz77::compress_t with the arguments (8, 4096) will
   give better results.
 
