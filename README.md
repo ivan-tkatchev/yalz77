@@ -81,5 +81,5 @@ decompressor will detect message boundaries properly for you.)
 `result` is the decompressed message.
 
 _Note_: calling `feed()` and `result()` out of order is undefined
-behaviour and will result in crashes.
+behaviour and might result in crashes.
 
