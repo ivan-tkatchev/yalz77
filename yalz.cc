@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Usage: %s [-1|-2] {-c|-d}, where -c is compression and -d is decompression.\n"
                 "  Input is stdin and and output is stdout.\n"
                 "  Add '-1' when compressing to enable fast and bad compression.\n"
-                "  Add '-2' when compressing to enable a compression mode for small files.", argv[0]);
+                "  Add '-2' when compressing to enable a compression mode for small files.\n", argv[0]);
         return 1;
     }
 
