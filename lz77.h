@@ -48,7 +48,7 @@
   const std::string& uncompressed = decompress.result();
 
   NOTE: if you're compressing short strings (on the order of a few kilobytes)
-  then instantiating lz77::compress_t with the arguments (8, 4096) will
+  then instantiating lz77::compress_t with the arguments (12, 4096) will
   give better results.
 
   --------
@@ -98,13 +98,14 @@
 
 namespace lz77 {
 
-// Constants
+// Constants.
+// They were chosen by a series of unscientific empirical tests.
 enum {
-    DEFAULT_SEARCHLEN = 8,
+    DEFAULT_SEARCHLEN = 12,
     DEFAULT_BLOCKSIZE = 64*1024,
     SHORTRUN_BITS = 3,
     SHORTRUN_MAX = (1 << SHORTRUN_BITS),
-    MIN_RUN = 3
+    MIN_RUN = 5
 };
 
 
@@ -150,8 +151,8 @@ inline size_t substr_run(const unsigned char* ai, const unsigned char* ae,
     return n;
 }
 
-// Utility function: Hash the first 3 and 6 bytes of a string into 16-bit ints.
-// (3 and 6 are magic constants.)
+// Utility function: Hash the first MIN_RUN bytes of a string into 16-bit ints.
+// (MIN_RUN is a magic constant.)
 // The hash function itself is important for compression quality.
 // This is the FNV hash, a very very simple and quite good hash algorithm.
 
@@ -159,7 +160,7 @@ inline uint32_t fnv32a(const unsigned char* i, size_t len, uint32_t hash = 0x811
 
     while (len > 0) {
         hash ^= (uint32_t)(*i);
-        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+        hash *= (uint32_t)0x01000193;
         ++i;
         --len;
     }
@@ -167,13 +168,11 @@ inline uint32_t fnv32a(const unsigned char* i, size_t len, uint32_t hash = 0x811
     return hash;
 }
 
-inline void pack_bytes(const unsigned char* i, uint16_t& packed3, uint16_t& packed6, size_t blocksize) {
+inline void pack_bytes(const unsigned char* i, uint16_t& packed, size_t blocksize) {
 
-    uint32_t a = fnv32a(i, 3);
-    uint32_t b = fnv32a(i+3, 3, a);
+    uint32_t a = fnv32a(i, MIN_RUN);
 
-    packed3 = (a >> 16) % blocksize;
-    packed6 = (b >> 16) % blocksize;
+    packed = a % blocksize;
 }
 
 
@@ -326,12 +325,10 @@ struct offsets_dict_t {
 
 struct compress_t {
 
-    offsets_dict_t offsets3;
-    offsets_dict_t offsets6;
+    offsets_dict_t offsets;
 
     compress_t(size_t searchlen = DEFAULT_SEARCHLEN, size_t blocksize = DEFAULT_BLOCKSIZE) :
-        offsets3(searchlen, blocksize),
-        offsets6(searchlen, blocksize) {}
+        offsets(searchlen, blocksize) {}
     
     std::string feed(const unsigned char* i, const unsigned char* e) {
 
@@ -343,19 +340,18 @@ struct compress_t {
 
         push_vlq_uint(e - i, ret);
 
-        offsets3.clear();
-        offsets6.clear();
+        offsets.clear();
 
-        size_t blocksize = offsets3.blocksize;
-        
+        size_t blocksize = offsets.blocksize;
+
         while (i != e) {
 
             unsigned char c = *i;
 
-            // The last 5 bytes are uncompressable. (At least 6 bytes
+            // The last MIN_RUN-1 bytes are uncompressable. (At least MIN_RUN bytes
             // are needed to calculate a prefix hash.)
 
-            if (i > e - 6) {
+            if (i > e - MIN_RUN) {
 
                 unc +=c;
                 ++i;
@@ -366,19 +362,15 @@ struct compress_t {
             size_t maxoffset = 0;
             size_t maxgain = 0;
 
-            uint16_t packed3;
-            uint16_t packed6;
+            uint16_t packed;
 
-            // Prefix lengths of 3 and 6 were chosen empirically, based on a series
+            // The MIN_RUN prefix length was chosen empirically, based on a series
             // of unscientific tests.
 
-            pack_bytes(i, packed3, packed6, blocksize);
+            pack_bytes(i, packed, blocksize);
 
-            offsets6(packed6, i0, i, e, maxrun, maxoffset, maxgain);
-            offsets3(packed3, i0, i, e, maxrun, maxoffset, maxgain);
+            offsets(packed, i0, i, e, maxrun, maxoffset, maxgain);
 
-            // A substring of length less than 3 is useless for us.
-            // (The hash uses 3 characters to search for matches.)
             if (maxrun < MIN_RUN) {
                 unc += c;
                 ++i;
@@ -395,8 +387,8 @@ struct compress_t {
             }
 
             // A compressed string is a length and an offset.
-            // First subtract 2 from the length (lengths less than 3 don't exist).
-            // Then check if the length fits in three bits; if it does, then
+            // First subtract the minimum length (smaller lengths don't exist).
+            // Then check if the length fits in SHORTRUN_BITS bits; if it does, then
             // tack it on to the offset. Otherwise write length and offset separately.
             // The rightmost bit is a zero to differentiate from packets of
             // uncompressed data.
