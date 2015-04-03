@@ -460,7 +460,7 @@ struct decompress_t {
 
     // Utility function: decode variable-length-coded unsigned integers.
 
-    bool pop_vlq_uint(const unsigned char*& i, const unsigned char* e, size_t& ret) {
+    bool pop_vlq_uint(const unsigned char*& i, const unsigned char* e, size_t& res) {
 
         while (1) {
 
@@ -479,7 +479,7 @@ struct decompress_t {
             ++i;
         }
 
-        ret = state.vlq_num;
+        res = state.vlq_num;
         state.vlq_num = 0;
         state.vlq_off = 0;
 
