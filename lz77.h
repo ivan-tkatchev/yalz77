@@ -467,7 +467,7 @@ struct decompress_t {
             if (i == e)
                 return false;
 
-            unsigned char c = *i;
+            size_t c = *i;
 
             if ((c & 0x80) == 0) {
                 state.vlq_num |= (c << state.vlq_off);
