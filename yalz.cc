@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
             smallmode = true;
     }
 
-    const size_t BUFSIZE = (smallmode ? 100*1024 : 10*1024*1024);
+    const size_t BUFSIZE = (smallmode || decompress ? 100*1024 : 10*1024*1024);
 
     if (compress) {
 
@@ -52,34 +52,37 @@ int main(int argc, char** argv) {
     } else if (decompress) {
 
         std::string buff;
+        buff.resize(BUFSIZE);
+        size_t buff_size = 0;
 
         lz77::decompress_t decompress;
         std::string extra;
 
         while (1) {
-            buff.resize(BUFSIZE);
-            size_t i = ::fread((void*)buff.data(), 1, buff.size(), stdin);
-            buff.resize(i);
+            buff_size = ::fread((void*)buff.data(), 1, buff.size(), stdin);
             
-            if (i == 0)
+            if (buff_size == 0)
                 break;
 
             std::string* what = &buff;
+            size_t what_size = buff_size;
             
-            while (!what->empty()) {
+            while (what_size > 0) {
 
-                bool done = decompress.feed(*what, extra);
+                const unsigned char* whatd = (const unsigned char*)what->data();
+                bool done = decompress.feed(whatd, whatd + what_size, extra);
 
                 if (!done)
                     break;
 
-                std::string result = decompress.result();
+                const std::string& result = decompress.result();
                 ::fwrite(result.data(), 1, result.size(), stdout);
 
                 what = &extra;
+                what_size = extra.size();
             }
 
-            if (i != BUFSIZE)
+            if (buff_size != BUFSIZE)
                 break;
         }
 

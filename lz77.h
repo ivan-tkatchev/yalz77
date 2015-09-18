@@ -436,6 +436,7 @@ struct compress_t {
 
 struct decompress_t {
 
+    size_t max_size;
     std::string ret;
     unsigned char* out;
     unsigned char* outb;
@@ -487,7 +488,15 @@ struct decompress_t {
     }
 
 
-    decompress_t() : out(NULL), outb(NULL), oute(NULL) {}
+    /*
+     * max_size is the maximum size of decompressed data you're willing to accept.
+     * This is strictly optional and needed for safety reasons, when you're
+     * paranoid about accepting data from unknown sources.
+     *
+     * The default of 0 means no sanity checking is done.
+     */
+
+    decompress_t(size_t _max_size = 0) : max_size(_max_size), out(NULL), outb(NULL), oute(NULL) {}
 
     /*
      * Inputs: the compressed string, as output from 'compress()'.
@@ -524,6 +533,9 @@ struct decompress_t {
             ++i;
 
             state = state_t();
+
+            if (max_size && size > max_size)
+                throw std::runtime_error("Uncompressed data in message deemed too large");
 
             ret.resize(size);
 
@@ -601,7 +613,7 @@ struct decompress_t {
 
                 unsigned char* outi = out - off;
 
-                if (outi < outb || out + run > oute)
+                if (outi >= oute || outi < outb || out + run > oute || out + run < out)
                     throw std::runtime_error("Malformed data while uncompressing");
 
                 if (outi + run < out) {
