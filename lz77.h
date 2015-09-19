@@ -535,7 +535,7 @@ struct decompress_t {
             state = state_t();
 
             if (max_size && size > max_size)
-                throw std::runtime_error("Uncompressed data in message deemed too large");
+                throw std::length_error("Uncompressed data in message deemed too large");
 
             ret.resize(size);
 
